@@ -3,7 +3,7 @@
 
 在 `~/.pub_cache/bin`下新建 `aqueduct_mysql`文件
 
-```
+``` shell
 cd  ~/.pub_cache/bin
 touch aquduct_mysql
 ```
@@ -23,7 +23,7 @@ fi
 ```
 
 给予`aqueduct_mysql`执行权限:
-``` 
+``` shell
 chmod +x aqueduct_mysql
 ```
 
@@ -40,19 +40,19 @@ dependencies:
 ## 使用`aqueduct_mysql`命令
 1. 生成`migration`文件：
 
-``` 
+``` shell
 aqueduct_mysql db generate
 ```
 
 2. 生成数据库
 
-```
+``` shell
 aqueduct_mysql db upgrade --connect mysql://username:password@host:port/databasename
 ```
 
 3. 添加认证client
 
-```
+``` shell
 aqueuct_mysql auth add-client --id newclient --connect mysql://username:password@host:port/databasename
 ```
 
@@ -73,4 +73,3 @@ aqueuct_mysql auth add-client --id newclient --connect mysql://username:password
 ```
 
 
-pub global activate -s path aqueduct_mysql 
