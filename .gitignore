@@ -1,0 +1,10 @@
+.dart_tool
+.idea
+.ios
+build
+gen
+.packages
+pubspec.lock
+.vscode/*
+.DS_Store
+

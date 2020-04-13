@@ -1,0 +1,14 @@
+name: aqueduct_mysql
+description: mysql for aqueduct.
+version: 0.0.1
+author: stable|kernel <shenjk@shenjk.com>
+
+environment:
+  sdk: ">=2.6.0 <3.0.0"
+
+dependencies:
+  aqueduct: ^3.3.0
+  sqljocky5: ^2.2.1
+
+dev_dependencies:
+  http: '>=0.11.3+7 <0.13.0'
