@@ -9,6 +9,8 @@ environment:
 dependencies:
   aqueduct: ^3.3.0
   sqljocky5: ^2.2.1
+  
 
 dev_dependencies:
   http: '>=0.11.3+7 <0.13.0'
+  

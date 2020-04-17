@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'package:aqueduct/aqueduct.dart';
 import 'package:aqueduct/src/db/query/mixin.dart';
-import 'package:aqueduct_mysql/src/mysql_query_reduce.dart';
 import 'package:sqljocky5/sqljocky.dart';
 import 'mysql_query_builder.dart';
+import 'mysql_query_reduce.dart';
 
 class MySqlQuery<InstanceType extends ManagedObject> extends Object
     with QueryMixin<InstanceType>
@@ -32,7 +32,7 @@ class MySqlQuery<InstanceType extends ManagedObject> extends Object
 
     final StreamedResults result = await context.persistentStore.executeQuery(
         buffer.toString(), builder.variables, timeoutInSeconds,
-        returnType: PersistentStoreQueryReturnType.rowCount);
+        returnType: PersistentStoreQueryReturnType.rowCount) as StreamedResults;
     return result.affectedRows;
   }
 
@@ -85,18 +85,24 @@ class MySqlQuery<InstanceType extends ManagedObject> extends Object
       buffer.write("(${builder.sqlColumnsToInsert}) ");
       buffer.write("VALUES (${builder.sqlValuesToInsert}); ");
     }
+    StreamedResults results = await context.persistentStore.executeQuery(
+            buffer.toString(), builder.variables, timeoutInSeconds)
+        as StreamedResults;
 
-    StreamedResults results = await context.persistentStore
-        .executeQuery(buffer.toString(), builder.variables, timeoutInSeconds);
-
-    if (results.insertId > 0 && (builder.returning?.length ?? 0) > 0) {
-      String sql =
-          "SELECT ${builder.sqlColumnsToReturn} FROM ${builder.sqlTableName} WHERE `${builder.entity.primaryKey}`=${results.insertId}";
-      final StreamedResults res = await context.persistentStore
-          .executeQuery(sql, null, timeoutInSeconds);
-      return builder.instancesForRows<InstanceType>(await res.toList()).first;
+    if (results.affectedRows > 0) {
+      String sql;
+      if (results.insertId > 0) {
+        sql =
+            "SELECT ${builder.sqlColumnsToReturn ?? "*"} FROM ${builder.sqlTableName} WHERE `${builder.entity.primaryKey}`=${results.insertId}";
+      } else {
+        sql =
+            "SELECT ${builder.sqlColumnsToReturn ?? "*"} FROM ${builder.sqlTableName} WHERE `${builder.entity.primaryKey}`=?/*v_${builder.entity.primaryKey}*/";
+      }
+      final StreamedResults res = await context.persistentStore.executeQuery(
+          sql, builder.variables, timeoutInSeconds) as StreamedResults;
+      return builder.instancesForRows<InstanceType>(await res.toList())?.first;
     }
-    return null; //TODO:
+    return null;
     // return builder.instancesForRows<InstanceType>(results).first;
   }
 
@@ -116,37 +122,28 @@ class MySqlQuery<InstanceType extends ManagedObject> extends Object
       throw canModifyAllInstancesError;
     }
 
-    // if ((builder.returning?.length ?? 0) > 0) {
-    //   // buffer.write("RETURNING ${builder.sqlColumnsToReturn}");
-    // }
-    
-    final StreamedResults results = await context.persistentStore
-        .executeQuery(buffer.toString(), builder.variables, timeoutInSeconds);
-    if (results.affectedRows > 0 && (builder.returning?.length ?? 0) > 0) {
-    
+    final StreamedResults results = await context.persistentStore.executeQuery(
+            buffer.toString(), builder.variables, timeoutInSeconds)
+        as StreamedResults;
+    if (results.affectedRows > 0 /*&& (builder.returning?.length ?? 0) > 0*/) {
       String sql =
-          "SELECT ${builder.sqlColumnsToReturn} FROM ${builder.sqlTableName} WHERE ${builder.sqlWhereClause} ";
-      final StreamedResults res = await context.persistentStore
-          .executeQuery(sql, builder.variables, timeoutInSeconds);
-      return builder.instancesForRows(await res.toList());
+          "SELECT ${builder.sqlColumnsToReturn ?? "*"} FROM ${builder.sqlTableName} WHERE ${builder.sqlWhereClause} ";
+      final StreamedResults res = await context.persistentStore.executeQuery(
+          sql, builder.variables, timeoutInSeconds) as StreamedResults;
+      return builder.instancesForRows(await res?.toList());
     }
-    // return builder.instancesForRows(results);
+
     return null;
   }
 
   @override
   Future<InstanceType> updateOne() async {
     var results = await update();
-    if(results==null || results.isEmpty){
+    if (results == null || results.isEmpty) {
       return null;
-    }else if(results.length==1){
+    } else if (results.length == 1) {
       return results.first;
     }
-    // if (results!=null && results.length == 1) {
-    //   return results.first;
-    // } else if (results.isEmpty) {
-    //   return null;
-    // }
 
     throw StateError(
         "Query error. 'updateOne' modified more than one row in '${entity.tableName}'. "
@@ -191,8 +188,10 @@ class MySqlQuery<InstanceType extends ManagedObject> extends Object
     if (offset != 0) {
       buffer.write("OFFSET $offset ");
     }
-    final StreamedResults results = await context.persistentStore
-        .executeQuery(buffer.toString(), builder.variables, timeoutInSeconds);
+
+    final StreamedResults results = await context.persistentStore.executeQuery(
+            buffer.toString(), builder.variables, timeoutInSeconds)
+        as StreamedResults;
 
     return builder.instancesForRows(await results.toList());
   }

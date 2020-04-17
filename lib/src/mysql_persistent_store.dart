@@ -1,18 +1,15 @@
 import 'dart:async';
 import 'package:aqueduct/aqueduct.dart';
-import 'package:aqueduct_mysql/src/mysql_errorcode.dart';
+
 import 'package:sqljocky5/connection/connection.dart';
 import 'package:sqljocky5/sqljocky.dart';
 
+import 'mysql_errorcode.dart';
 import 'mysql_query.dart';
 import 'mysql_schema_generator.dart';
 import 'utils.dart';
 
 class MySqlPersistentStore extends PersistentStore with MySqlSchemaGenerator {
-  static Logger logger = Logger("aqueduct_mysql");
-
-  final ConnectionSettings connectionSettings;
-
   MySqlPersistentStore(String username, String password, String host, int port,
       String databaseName, {bool useSSL = false})
       : connectionSettings = ConnectionSettings(
@@ -23,8 +20,16 @@ class MySqlPersistentStore extends PersistentStore with MySqlSchemaGenerator {
             db: databaseName,
             useSSL: useSSL);
 
+  factory MySqlPersistentStore._transactionProxy(
+      MySqlPersistentStore parent, Querier ctx) {
+    return _TransactionProxy(parent, ctx);
+  }
   MySqlPersistentStore._from(MySqlPersistentStore from)
       : connectionSettings = from.connectionSettings;
+
+  static Logger logger = Logger("aqueduct_mysql");
+
+  final ConnectionSettings connectionSettings;
 
   @override
   String get databaseName => connectionSettings?.db;
@@ -81,11 +86,9 @@ class MySqlPersistentStore extends PersistentStore with MySqlSchemaGenerator {
     var dbConnection = await executionContext;
 
     try {
-      var rows = (substitutionValues != null && substitutionValues.isNotEmpty)
-          ? (await dbConnection.prepared(
-              sql, MySqlUtils.getMySqlVariables(sql, substitutionValues)))
-          : (await dbConnection.execute(sql));
-      // timeoutInSeconds: timeout.inSeconds);
+      List<dynamic> params =
+          MySqlUtils.getMySqlVariables(sql, substitutionValues);
+      var rows = await _executeMySql(dbConnection, sql, params);
 
       var mappedRows = await rows.map((row) => row.toList()).toList();
       logger.finest(() =>
@@ -101,6 +104,30 @@ class MySqlPersistentStore extends PersistentStore with MySqlSchemaGenerator {
     }
   }
 
+  Future<StreamedResults> _executeMySql(
+      Querier dbConnection, String sql, List<dynamic> params,
+      [int timeoutInSeconds]) {
+    Future<StreamedResults> results;
+    if (params == null || params.isEmpty) {
+      if (timeoutInSeconds != null && timeoutInSeconds > 0) {
+        results = dbConnection
+            .execute(sql)
+            .timeout(Duration(seconds: timeoutInSeconds));
+      } else {
+        results = dbConnection.execute(sql);
+      }
+    } else {
+      if (timeoutInSeconds != null && timeoutInSeconds > 0) {
+        results = dbConnection
+            .prepared(sql, params)
+            .timeout(Duration(seconds: timeoutInSeconds));
+      } else {
+        results = dbConnection.prepared(sql, params);
+      }
+    }
+    return results;
+  }
+
   @override
   Future<dynamic> executeQuery(
       String formatString, Map<String, dynamic> values, int timeoutInSeconds,
@@ -111,26 +138,9 @@ class MySqlPersistentStore extends PersistentStore with MySqlSchemaGenerator {
       StreamedResults results;
       List<dynamic> paramValues =
           MySqlUtils.getMySqlVariables(formatString, values);
-      // print(formatString);
-      // print(values?.keys);
-      // print(values?.values);
-      // print(paramValues);
 
-      if (returnType == PersistentStoreQueryReturnType.rows) {
-        results = await dbConnection
-            .prepared(formatString, paramValues)
-            .timeout(Duration(seconds: timeoutInSeconds));
-      } else {
-        if (values != null && values.isNotEmpty) {
-          results = await dbConnection
-              .prepared(formatString, paramValues)
-              .timeout(Duration(seconds: timeoutInSeconds));
-        } else {
-          results = await dbConnection
-              .execute(formatString)
-              .timeout(Duration(seconds: timeoutInSeconds));
-        }
-      }
+      results = await _executeMySql(
+          dbConnection, formatString, paramValues, timeoutInSeconds);
 
       logger.fine(() =>
           "Query (${DateTime.now().toUtc().difference(now).inMilliseconds}ms) $formatString Substitutes: ${values ?? "{}"} -> $results");
@@ -140,7 +150,6 @@ class MySqlPersistentStore extends PersistentStore with MySqlSchemaGenerator {
       throw QueryException.transport("timed out connection to database",
           underlyingException: e);
     } on MySqlException catch (e) {
-      print(e.runtimeType);
       logger.fine(() =>
           "Query (${DateTime.now().toUtc().difference(now).inMilliseconds}ms) $formatString $values");
       logger.warning(() => e.toString());
@@ -202,7 +211,7 @@ class MySqlPersistentStore extends PersistentStore with MySqlSchemaGenerator {
           output = await transactionBlock(transactionContext);
         } on Rollback catch (e) {
           rollback = e;
-          dbTransactionContext.rollback();
+          await dbTransactionContext.rollback();
           // dbTransactionContext.cancelTransaction(reason: rollback.reason);
         }
       });
@@ -300,8 +309,8 @@ class MySqlPersistentStore extends PersistentStore with MySqlSchemaGenerator {
     final exists = await context.prepared(
         "select count(*)  from information_schema.TABLES t where t.TABLE_SCHEMA =? and t.TABLE_NAME =?",
         [databaseName, table.name]);
-    Row first = await exists.first;
-    if (first != null && first.first > 0) {
+    Row result = await exists.first;
+    if ((result != null) && (result.first as int) > 0) {
       return;
     }
 
@@ -310,11 +319,6 @@ class MySqlPersistentStore extends PersistentStore with MySqlSchemaGenerator {
       logger.info("\t$cmd");
       await context.execute(cmd);
     }
-  }
-
-  factory MySqlPersistentStore._transactionProxy(
-      MySqlPersistentStore parent, Querier ctx) {
-    return _TransactionProxy(parent, ctx);
   }
 
   Future<Querier> get executionContext => getDatabaseConnection();
